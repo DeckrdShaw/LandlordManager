@@ -1,0 +1,1039 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Landlord Management App</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prop-types/15.8.1/prop-types.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <script src="https://unpkg.com/papaparse@latest/papaparse.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chrono-node/1.3.11/chrono.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/recharts/2.15.0/Recharts.min.js"></script>
+  <script src="https://unpkg.com/@capacitor/core@6.1.2/dist/capacitor.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@capacitor/safe-area@2.1.2/dist/index.js"></script>
+</head>
+<body class="bg-gray-100 font-sans">
+  <div id="root" class="min-h-screen flex items-center justify-center"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+    const { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } = Recharts;
+
+    // Sample CSV data for Barua Bhavan (July 2025)
+    const csvData = `
+Date,Tenant,Person,Mobile,Unit,Include,Rent,Due,Remark,Deposit
+45847,Md. Ismail Kabir,3,01883 33 33 17,3,Gas+Water,5500,,Paid,5000
+45848,Md. Forman Uddin,4,01932 13 97 44,2,Gas+Water,6000,,Paid,5500
+45848,Md. Sohabul Alam,3,01872 3582 28,5,Gas+Water,6000,,Paid,6000
+45850,Md. Azim Uddin,4,01511 20 35 60,6,Gas+Water,6000,,Paid,5500
+45839,Mohammed Yousuf,3,01824 91 15 21,4,Gas+Water,0,,Vacated,0
+45851,Mr. Shyamal Nath,2,01870 91 43 07,7,Water+GB,5000,,Paid,0
+45854,Md. Aymon,0,01575 16 75 61,4,Gas+Water,6000,,ADVANCE,0
+`;
+
+    // Sample expenses data for Barua Bhavan (July 2025)
+    const initialExpenses = [
+      { month: 'July 2025', data: [
+        { category: 'A-1', amount: 1000 },
+        { category: 'A-2', amount: 1000 },
+        { category: 'A-3', amount: 1000 },
+        { category: 'Water', amount: 1075 },
+        { category: 'Electricity', amount: 2000 },
+        { category: 'City Tax', amount: 632 },
+        { category: 'Land Tax', amount: 200 },
+      ]},
+    ];
+
+    const App = () => {
+      const [properties, setProperties] = useState([
+        {
+          id: '1',
+          name: 'Barua Bhavan',
+          address: '689/F Omar Ali Matbar Lane, Chawkbazar, Chattogram',
+          mobile: '+880 1766 28 15 11',
+          email: 'baruasb@gmail.com',
+          tenants: [],
+          expenses: initialExpenses,
+          notes: [],
+        },
+      ]);
+      const [currentPropertyId, setCurrentPropertyId] = useState('1');
+      const [newProperty, setNewProperty] = useState({
+        id: '',
+        name: '',
+        address: '',
+        mobile: '',
+        email: '',
+      });
+      const [showPropertyForm, setShowPropertyForm] = useState(false);
+      const [newExpense, setNewExpense] = useState({ category: '', amount: '' });
+      const [editExpense, setEditExpense] = useState(null);
+      const [currentMonth, setCurrentMonth] = useState('July 2025');
+      const [currency, setCurrency] = useState('BDT');
+      const [loading, setLoading] = useState(true);
+      const [newTenant, setNewTenant] = useState({
+        date: '',
+        tenant: '',
+        person: '',
+        mobile: '',
+        unit: '',
+        include: 'Gas+Water',
+        rent: 0,
+        due: 0,
+        remark: 'Paid',
+        deposit: 0,
+      });
+      const [editTenant, setEditTenant] = useState(null);
+      const [dateError, setDateError] = useState('');
+      const [propertyError, setPropertyError] = useState('');
+      const [expenseError, setExpenseError] = useState('');
+      const [showForm, setShowForm] = useState(false);
+      const [showExpenseForm, setShowExpenseForm] = useState(false);
+      const [showNoteForm, setShowNoteForm] = useState(false);
+      const [newNote, setNewNote] = useState('');
+      const [noteError, setNoteError] = useState('');
+      const [csvLoaded, setCsvLoaded] = useState(false);
+
+      // Convert Excel serial date to DD/MM/YYYY
+      const excelSerialToDate = (serial) => {
+        if (!serial || isNaN(serial)) return '';
+        const baseDate = new Date(1900, 0, 1);
+        const date = new Date(baseDate.getTime() + (serial - 2) * 86400000);
+        return formatDate(date);
+      };
+
+      // Format date to DD/MM/YYYY
+      const formatDate = (date) => {
+        if (date instanceof Date) {
+          const day = String(date.getDate()).padStart(2, '0');
+          const month = String(date.getMonth() + 1).padStart(2, '0');
+          const year = date.getFullYear();
+          return ${day}/${month}/${year};
+        }
+        return date;
+      };
+
+      // Parse input date with DD/MM/YYYY preference
+      const parseInputDate = (input) => {
+        if (!input) return '';
+        const regex = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
+        if (!regex.test(input)) {
+          setDateError('Please enter date as DD/MM/YYYY (e.g., 01/07/2025)');
+          return input;
+        }
+        const [_, day, month, year] = input.match(regex);
+        const parsed = chrono.parseDate(${day}/${month}/${year}, { forwardDate: true });
+        if (!parsed) {
+          setDateError('Invalid date. Please use DD/MM/YYYY (e.g., 01/07/2025)');
+          return input;
+        }
+        setDateError('');
+        return formatDate(parsed);
+      };
+
+      // Generate dynamic month/year options
+      const generateMonthOptions = () => {
+        const options = [];
+        const startYear = 2025;
+        const endYear = new Date().getFullYear() + 10;
+        const months = [
+          'January', 'February', 'March', 'April', 'May', 'June',
+          'July', 'August', 'September', 'October', 'November', 'December'
+        ];
+
+        for (let year = startYear; year <= endYear; year++) {
+          for (let month of months) {
+            options.push(${month} ${year});
+          }
+        }
+        return options;
+      };
+
+      // Generate unique property ID
+      const generatePropertyId = () => {
+        return Math.random().toString(36).substr(2, 9);
+      };
+
+      // Load tenant CSV data for Barua Bhavan only
+      useEffect(() => {
+        if (!csvLoaded) {
+          Papa.parse(csvData, {
+            header: true,
+            skipEmptyLines: true,
+            transformHeader: (header) => header.trim().replace(/^"|"$/g, ''),
+            transform: (value, header) => {
+              let cleaned = value.trim().replace(/^"|"$/g, '');
+              if (['Rent', 'Due', 'Deposit', 'Person'].includes(header)) {
+                return parseFloat(cleaned) || 0;
+              }
+              if (header === 'Date') {
+                return excelSerialToDate(parseFloat(cleaned)) || cleaned;
+              }
+              return cleaned;
+            },
+            complete: (results) => {
+              const cleanedData = processTenantData(results.data);
+              setProperties((prev) =>
+                prev.map((prop) =>
+                  prop.id === '1' ? { ...prop, tenants: cleanedData } : prop
+                )
+              );
+              setCsvLoaded(true);
+              setLoading(false);
+            },
+            error: (err) => {
+              console.error('Papa Parse error:', err);
+              setCsvLoaded(true);
+              setLoading(false);
+            },
+          });
+        } else {
+          setLoading(false);
+        }
+      }, [csvLoaded]);
+
+      // Process tenant data by month
+      const processTenantData = (data) => {
+        const months = [
+          'January 2025', 'February 2025', 'March 2025', 'April 2025', 'May 2025',
+          'June 2025', 'July 2025', 'August 2025', 'September 2025', 'October 2025',
+          'November 2025', 'December 2025'
+        ];
+        const monthData = months.map(month => ({ month, data: [] }));
+
+        data.forEach(row => {
+          if (row.Tenant && row.Unit) {
+            const tenantData = {
+              date: row.Date,
+              tenant: row.Tenant,
+              person: parseInt(row.Person) || 0,
+              mobile: row.Mobile || '',
+              unit: row.Unit,
+              include: row.Include,
+              rent: parseFloat(row.Rent) || 0,
+              due: parseFloat(row.Due) || 0,
+              remark: row.Remark || '',
+              deposit: parseFloat(row.Deposit) || 0,
+            };
+            const date = excelSerialToDate(row.Date);
+            const monthYear = date ? ${new Date(date.split('/')[1] + '/' + date.split('/')[0] + '/' + date.split('/')[2]).toLocaleString('en-US', { month: 'long' })} ${new Date(date.split('/')[1] + '/' + date.split('/')[0] + '/' + date.split('/')[2]).getFullYear()} : currentMonth;
+            const monthIndex = months.indexOf(monthYear);
+            if (monthIndex >= 0) {
+              monthData[monthIndex].data.push(tenantData);
+            }
+          }
+        });
+
+        return monthData.filter(entry => entry.data.length > 0);
+      };
+
+      // Calculate totals for a given month
+      const calculateTotals = (monthData, monthExpenses) => {
+        const totalRent = monthData.reduce((sum, tenant) => sum + (isNaN(tenant.rent) ? 0 : tenant.rent), 0);
+        const totalExpenses = monthExpenses.reduce((sum, exp) => sum + (isNaN(exp.amount) ? 0 : exp.amount), 0);
+        return { totalRent, totalExpenses, net: totalRent - totalExpenses };
+      };
+
+      // Handle tenant form input changes
+      const handleTenantInputChange = (e) => {
+        const { name, value } = e.target;
+        const updatedValue = name === 'date' ? parseInputDate(value) : value;
+        if (editTenant) {
+          setEditTenant((prev) => ({ ...prev, [name]: updatedValue }));
+        } else {
+          setNewTenant((prev) => ({ ...prev, [name]: updatedValue }));
+        }
+      };
+
+      // Handle property form input changes
+      const handlePropertyInputChange = (e) => {
+        const { name, value } = e.target;
+        setNewProperty((prev) => ({ ...prev, [name]: value }));
+      };
+
+      // Handle expense form input changes
+      const handleExpenseInputChange = (e) => {
+        const { name, value } = e.target;
+        setNewExpense((prev) => ({ ...prev, [name]: value }));
+      };
+
+      // Handle note input change
+      const handleNoteInputChange = (e) => {
+        setNewNote(e.target.value);
+        if (e.target.value.trim()) {
+          setNoteError('');
+        }
+      };
+
+      // Add or edit property
+      const addOrUpdateProperty = (e) => {
+        e.preventDefault();
+        if (!newProperty.name || !newProperty.address) {
+          setPropertyError('Property name and address are required');
+          return;
+        }
+        if (properties.length >= 50 && !newProperty.id) {
+          setPropertyError('Maximum 50 properties allowed');
+          return;
+        }
+        setProperties((prev) => {
+          if (newProperty.id) {
+            return prev.map((prop) =>
+              prop.id === newProperty.id
+                ? { ...prop, ...newProperty }
+                : prop
+            );
+          }
+          return [
+            ...prev,
+            {
+              id: generatePropertyId(),
+              ...newProperty,
+              tenants: [],
+              expenses: [],
+              notes: [],
+            },
+          ];
+        });
+        setNewProperty({ id: '', name: '', address: '', mobile: '', email: '' });
+        setShowPropertyForm(false);
+        setPropertyError('');
+      };
+
+      // Edit property
+      const startEditingProperty = (property) => {
+        setNewProperty({
+          id: property.id,
+          name: property.name,
+          address: property.address,
+          mobile: property.mobile || '',
+          email: property.email || '',
+        });
+        setShowPropertyForm(true);
+        setPropertyError('');
+      };
+
+      // Delete property
+      const deleteProperty = (id) => {
+        if (properties.length === 1) {
+          setPropertyError('At least one property is required');
+          return;
+        }
+        setProperties((prev) => prev.filter((prop) => prop.id !== id));
+        if (currentPropertyId === id) {
+          setCurrentPropertyId(properties[0].id);
+        }
+      };
+
+      // Add or edit expense
+      const addOrEditExpense = (e) => {
+        e.preventDefault();
+        if (!newExpense.category || !newExpense.amount || isNaN(parseFloat(newExpense.amount))) {
+          setExpenseError('Category and a valid amount are required');
+          return;
+        }
+        const newEntry = {
+          category: newExpense.category,
+          amount: parseFloat(newExpense.amount) || 0,
+        };
+        setProperties((prev) => {
+          const updated = [...prev];
+          const propIndex = updated.findIndex((p) => p.id === currentPropertyId);
+          const monthIndex = updated[propIndex].expenses.findIndex((m) => m.month === currentMonth);
+          if (monthIndex >= 0) {
+            if (editExpense) {
+              updated[propIndex].expenses[monthIndex].data = updated[propIndex].expenses[monthIndex].data.map((exp, index) =>
+                index === editExpense.index ? newEntry : exp
+              );
+            } else {
+              updated[propIndex].expenses[monthIndex].data.push(newEntry);
+            }
+          } else {
+            updated[propIndex].expenses.push({ month: currentMonth, data: [newEntry] });
+          }
+          return updated;
+        });
+        setNewExpense({ category: '', amount: '' });
+        setEditExpense(null);
+        setShowExpenseForm(false);
+        setExpenseError('');
+      };
+
+      // Start editing an expense
+      const startEditingExpense = (expense, index) => {
+        setNewExpense({
+          category: expense.category,
+          amount: expense.amount.toString(),
+        });
+        setEditExpense({ ...expense, index });
+        setShowExpenseForm(true);
+        setExpenseError('');
+      };
+
+      // Delete an expense
+      const deleteExpense = (index) => {
+        setProperties((prev) => {
+          const updated = [...prev];
+          const propIndex = updated.findIndex((p) => p.id === currentPropertyId);
+          const monthIndex = updated[propIndex].expenses.findIndex((m) => m.month === currentMonth);
+          if (monthIndex >= 0) {
+            updated[propIndex].expenses[monthIndex].data = updated[propIndex].expenses[monthIndex].data.filter((_, i) => i !== index);
+            if (updated[propIndex].expenses[monthIndex].data.length === 0) {
+              updated[propIndex].expenses.splice(monthIndex, 1);
+            }
+          }
+          return updated;
+        });
+      };
+
+      // Add a new tenant
+      const addTenant = (e) => {
+        e.preventDefault();
+        if (dateError) return;
+        const newEntry = {
+          ...newTenant,
+          date: parseInputDate(newTenant.date),
+          rent: parseFloat(newTenant.rent) || 0,
+          due: parseFloat(newTenant.due) || 0,
+          deposit: parseFloat(newTenant.deposit) || 0,
+          person: parseInt(newTenant.person) || 0,
+        };
+        setProperties((prev) => {
+          const updated = [...prev];
+          const propIndex = updated.findIndex((p) => p.id === currentPropertyId);
+          const monthIndex = updated[propIndex].tenants.findIndex((m) => m.month === currentMonth);
+          if (monthIndex >= 0) {
+            updated[propIndex].tenants[monthIndex].data.push(newEntry);
+          } else {
+            updated[propIndex].tenants.push({ month: currentMonth, data: [newEntry] });
+          }
+          return updated;
+        });
+        setNewTenant({
+          date: '',
+          tenant: '',
+          person: '',
+          mobile: '',
+          unit: '',
+          include: 'Gas+Water',
+          rent: 0,
+          due: 0,
+          remark: 'Paid',
+          deposit: 0,
+        });
+        setShowForm(false);
+        setDateError('');
+      };
+
+      // Edit an existing tenant
+      const editTenantData = (e) => {
+        e.preventDefault();
+        if (dateError) return;
+        setProperties((prev) => {
+          const updated = [...prev];
+          const propIndex = updated.findIndex((p) => p.id === currentPropertyId);
+          const monthIndex = updated[propIndex].tenants.findIndex((m) => m.month === currentMonth);
+          if (monthIndex >= 0) {
+            updated[propIndex].tenants[monthIndex].data = updated[propIndex].tenants[monthIndex].data.map((tenant, index) =>
+              index === editTenant.index ? { ...editTenant, date: parseInputDate(editTenant.date), person: parseInt(editTenant.person) || 0 } : tenant
+            );
+          }
+          return updated;
+        });
+        setEditTenant(null);
+        setShowForm(false);
+        setDateError('');
+      };
+
+      // Delete a tenant
+      const deleteTenant = (index) => {
+        setProperties((prev) => {
+          const updated = [...prev];
+          const propIndex = updated.findIndex((p) => p.id === currentPropertyId);
+          const monthIndex = updated[propIndex].tenants.findIndex((m) => m.month === currentMonth);
+          if (monthIndex >= 0) {
+            updated[propIndex].tenants[monthIndex].data = updated[propIndex].tenants[monthIndex].data.filter((_, i) => i !== index);
+            if (updated[propIndex].tenants[monthIndex].data.length === 0) {
+              updated[propIndex].tenants.splice(monthIndex, 1);
+            }
+          }
+          return updated;
+        });
+      };
+
+      // Add a new note
+      const addNote = (e) => {
+        e.preventDefault();
+        if (!newNote.trim()) {
+          setNoteError('Note cannot be empty');
+          return;
+        }
+        setProperties((prev) => {
+          const updated = [...prev];
+          const propIndex = updated.findIndex((p) => p.id === currentPropertyId);
+          updated[propIndex].notes = [...(updated[propIndex].notes || []), newNote.trim()];
+          return updated;
+        });
+        setNewNote('');
+        setShowNoteForm(false);
+        setNoteError('');
+      };
+
+      // Delete a note
+      const deleteNote = (index) => {
+        setProperties((prev) => {
+          const updated = [...prev];
+          const propIndex = updated.findIndex((p) => p.id === currentPropertyId);
+          updated[propIndex].notes = updated[propIndex].notes.filter((_, i) => i !== index);
+          return updated;
+        });
+      };
+
+      // Start editing a tenant
+      const startEditing = (tenant, index) => {
+        setEditTenant({ ...tenant, index });
+        setShowForm(true);
+        setDateError('');
+      };
+
+      // Handle currency change
+      const handleCurrencyChange = (e) => {
+        setCurrency(e.target.value);
+      };
+
+      // Format numbers with currency, preventing NaN
+      const formatNumber = (num) => {
+        if (isNaN(num) || num === null || num === undefined) {
+          num = 0;
+        }
+        return new Intl.NumberFormat('en-US', {
+          style: 'currency',
+          currency: currency,
+          minimumFractionDigits: 0,
+          currencyDisplay: 'symbol',
+        }).format(num);
+      };
+
+      // Render loading state
+      if (loading) {
+        return (
+          <div className="text-center text-gray-600 text-lg">
+            Loading rental data...
+          </div>
+        );
+      }
+
+      // Get current property
+      const currentProperty = properties.find((p) => p.id === currentPropertyId) || properties[0];
+      const currentMonthData = currentProperty.tenants.find((t) => t.month === currentMonth)?.data || [];
+      const currentMonthExpenses = currentProperty.expenses.find((e) => e.month === currentMonth)?.data || [];
+      const currentNotes = currentProperty.notes || [];
+      const { totalRent, totalExpenses, net } = calculateTotals(currentMonthData, currentMonthExpenses);
+
+      // Generate chart data for current property
+      const chartData = currentProperty.tenants.map((month) => {
+        const monthExpenses = currentProperty.expenses.find((e) => e.month === month.month)?.data || [];
+        const totals = calculateTotals(month.data, monthExpenses);
+        return {
+          month: month.month.split(' ')[0],
+          rent: totals.totalRent,
+          expenses: totals.totalExpenses,
+          net: totals.net,
+        };
+      });
+
+      // Main UI
+      return (
+        <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-4xl">
+          <div className="text-center mb-8">
+            <h1 className="text-3xl font-bold text-gray-800">Landlord Management</h1>
+            <div className="flex justify-center items-center gap-4 mt-2">
+              <select
+                className="border rounded-lg p-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={currentPropertyId}
+                onChange={(e) => setCurrentPropertyId(e.target.value)}
+              >
+                {properties.map((prop) => (
+                  <option key={prop.id} value={prop.id}>
+                    {prop.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition"
+                onClick={() => {
+                  setNewProperty({ id: '', name: '', address: '', mobile: '', email: '' });
+                  setShowPropertyForm(!showPropertyForm);
+                  setPropertyError('');
+                }}
+              >
+                {showPropertyForm ? 'Cancel' : 'Add Property'}
+              </button>
+              <button
+                className="bg-yellow-500 text-white px-4 py-2 rounded-lg hover:bg-yellow-600 transition"
+                onClick={() => startEditingProperty(currentProperty)}
+              >
+                Edit Property
+              </button>
+            </div>
+            <h2 className="text-2xl font-semibold text-gray-800 mt-2">{currentProperty.name}</h2>
+            <p className="text-gray-600">{currentProperty.address}</p>
+            <p className="text-gray-600">
+              {currentProperty.mobile && Mobile: ${currentProperty.mobile}}
+              {currentProperty.mobile && currentProperty.email && ' | '}
+              {currentProperty.email && Email: ${currentProperty.email}}
+            </p>
+          </div>
+
+          {showPropertyForm && (
+            <form onSubmit={addOrUpdateProperty} className="mb-6 p-4 bg-gray-50 rounded-lg">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="relative">
+                  <input
+                    type="text"
+                    name="name"
+                    value={newProperty.name}
+                    onChange={handlePropertyInputChange}
+                    placeholder="Property Name"
+                    className={border rounded-lg p-2 w-full focus:outline-none focus:ring-2 ${propertyError ? 'border-red-500 focus:ring-red-500' : 'focus:ring-blue-500'}}
+                    required
+                  />
+                </div>
+                <div className="relative">
+                  <input
+                    type="text"
+                    name="address"
+                    value={newProperty.address}
+                    onChange={handlePropertyInputChange}
+                    placeholder="Address"
+                    className={border rounded-lg p-2 w-full focus:outline-none focus:ring-2 ${propertyError ? 'border-red-500 focus:ring-red-500' : 'focus:ring-blue-500'}}
+                    required
+                  />
+                </div>
+                <input
+                  type="text"
+                  name="mobile"
+                  value={newProperty.mobile}
+                  onChange={handlePropertyInputChange}
+                  placeholder="Mobile (optional)"
+                  className="border rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <input
+                  type="email"
+                  name="email"
+                  value={newProperty.email}
+                  onChange={handlePropertyInputChange}
+                  placeholder="Email (optional)"
+                  className="border rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              {propertyError && (
+                <p className="text-red-500 text-sm mt-2">{propertyError}</p>
+              )}
+              <div className="mt-4 flex gap-2">
+                <button
+                  type="submit"
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition"
+                >
+                  {newProperty.id ? 'Update Property' : 'Add Property'}
+                </button>
+                {newProperty.id && (
+                  <button
+                    type="button"
+                    className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-600 transition"
+                    onClick={() => deleteProperty(newProperty.id)}
+                  >
+                    Delete Property
+                  </button>
+                )}
+              </div>
+            </form>
+          )}
+
+          <div className="flex justify-between mb-6">
+            <select
+              className="border rounded-lg p-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              value={currentMonth}
+              onChange={(e) => setCurrentMonth(e.target.value)}
+            >
+              {generateMonthOptions().map((month) => (
+                <option key={month} value={month}>
+                  {month}
+                </option>
+              ))}
+            </select>
+            <select
+              className="border rounded-lg p-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              value={currency}
+              onChange={handleCurrencyChange}
+            >
+              <option value="BDT">BDT (৳)</option>
+              <option value="USD">USD ($)</option>
+              <option value="EUR">EUR (€)</option>
+              <option value="GBP">GBP (£)</option>
+              <option value="KRW">KRW (₩)</option>
+              <option value="JPY">JPY (¥)</option>
+              <option value="THB">THB (฿)</option>
+            </select>
+          </div>
+
+          <button
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg mb-6 hover:bg-blue-700 transition"
+            onClick={() => {
+              setEditTenant(null);
+              setNewTenant({
+                date: '',
+                tenant: '',
+                person: '',
+                mobile: '',
+                unit: '',
+                include: 'Gas+Water',
+                rent: 0,
+                due: 0,
+                remark: 'Paid',
+                deposit: 0,
+              });
+              setShowForm(!showForm);
+              setDateError('');
+            }}
+          >
+            {showForm ? 'Cancel' : 'Add Tenant'}
+          </button>
+
+          {showForm && (
+            <form onSubmit={editTenant ? editTenantData : addTenant} className="mb-6 p-4 bg-gray-50 rounded-lg">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="relative">
+                  <input
+                    type="text"
+                    name="date"
+                    value={editTenant ? editTenant.date : newTenant.date}
+                    onChange={handleTenantInputChange}
+                    placeholder="Date (e.g., 01/07/2025)"
+                    className={border rounded-lg p-2 w-full focus:outline-none focus:ring-2 ${dateError ? 'border-red-500 focus:ring-red-500' : 'focus:ring-blue-500'}}
+                    required
+                  />
+                  {dateError && (
+                    <p className="text-red-500 text-sm mt-1">{dateError}</p>
+                  )}
+                </div>
+                <input
+                  type="text"
+                  name="tenant"
+                  value={editTenant ? editTenant.tenant : newTenant.tenant}
+                  onChange={handleTenantInputChange}
+                  placeholder="Tenant Name"
+                  className="border rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+                <input
+                  type="number"
+                  name="person"
+                  value={editTenant ? editTenant.person : newTenant.person}
+                  onChange={handleTenantInputChange}
+                  placeholder="Number of Persons"
+                  className="border rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+                <input
+                  type="text"
+                  name="mobile"
+                  value={editTenant ? editTenant.mobile : newTenant.mobile}
+                  onChange={handleTenantInputChange}
+                  placeholder="Mobile"
+                  className="border rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <input
+                  type="text"
+                  name="unit"
+                  value={editTenant ? editTenant.unit : newTenant.unit}
+                  onChange={handleTenantInputChange}
+                  placeholder="Unit"
+                  className="border rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+                <select
+                  name="include"
+                  value={editTenant ? editTenant.include : newTenant.include}
+                  onChange={handleTenantInputChange}
+                  className="border rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="Gas+Water">Gas+Water</option>
+                  <option value="Water">Water</option>
+                  <option value="Water+GB">Water+Gas Bottle</option>
+                </select>
+                <input
+                  type="number"
+                  name="rent"
+                  value={editTenant ? editTenant.rent : newTenant.rent}
+                  onChange={handleTenantInputChange}
+                  placeholder="Rent"
+                  className="border rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+                <input
+                  type="number"
+                  name="due"
+                  value={editTenant ? editTenant.due : newTenant.due}
+                  onChange={handleTenantInputChange}
+                  placeholder="Due"
+                  className="border rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <select
+                  name="remark"
+                  value={editTenant ? editTenant.remark : newTenant.remark}
+                  onChange={handleTenantInputChange}
+                  className="border rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="Paid">Paid</option>
+                  <option value="Vacated">Vacated</option>
+                  <option value="ADVANCE">Advanced</option>
+                </select>
+                <input
+                  type="number"
+                  name="deposit"
+                  value={editTenant ? editTenant.deposit : newTenant.deposit}
+                  onChange={handleTenantInputChange}
+                  placeholder="Deposit"
+                  className="border rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <button
+                type="submit"
+                className={mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition ${dateError ? 'opacity-50 cursor-not-allowed' : ''}}
+                disabled={dateError}
+              >
+                {editTenant ? 'Update Tenant' : 'Add Tenant'}
+              </button>
+            </form>
+          )}
+
+          <div className="overflow-x-auto mt-6">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-gray-200">
+                  <th className="p-3">Date</th>
+                  <th className="p-3">Tenant</th>
+                  <th className="p-3">Persons</th>
+                  <th className="p-3">Unit</th>
+                  <th className="p-3">Include</th>
+                  <th className="p-3">Rent</th>
+                  <th className="p-3">Due</th>
+                  <th className="p-3">Remark</th>
+                  <th className="p-3">Deposit</th>
+                  <th className="p-3">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {currentMonthData.map((tenant, index) => (
+                  <tr key={index} className="border-b hover:bg-gray-50">
+                    <td className="p-3">{formatDate(tenant.date)}</td>
+                    <td className="p-3">{tenant.tenant}</td>
+                    <td className="p-3">{tenant.person}</td>
+                    <td className="p-3">{tenant.unit}</td>
+                    <td className="p-3">{tenant.include}</td>
+                    <td className="p-3">{formatNumber(tenant.rent)}</td>
+                    <td className="p-3">{formatNumber(tenant.due)}</td>
+                    <td className="p-3">{tenant.remark}</td>
+                    <td className="p-3">{formatNumber(tenant.deposit)}</td>
+                    <td className="p-3">
+                      <button
+                        className="bg-yellow-500 text-white px-2 py-1 rounded-lg hover:bg-yellow-600 transition mr-2"
+                        onClick={() => startEditing(tenant, index)}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        className="bg-red-500 text-white px-2 py-1 rounded-lg hover:bg-red-600 transition"
+                        onClick={() => deleteTenant(index)}
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="mt-6">
+            <div className="flex justify-between items-center">
+              <h3 className="text-lg font-semibold text-gray-800">Expenses</h3>
+              <button
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition"
+                onClick={() => {
+                  setNewExpense({ category: '', amount: '' });
+                  setEditExpense(null);
+                  setShowExpenseForm(!showExpenseForm);
+                  setExpenseError('');
+                }}
+              >
+                {showExpenseForm ? 'Cancel' : 'Add Expense'}
+              </button>
+            </div>
+            {showExpenseForm && (
+              <form onSubmit={addOrEditExpense} className="mt-4 p-4 bg-gray-50 rounded-lg">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="relative">
+                    <input
+                      type="text"
+                      name="category"
+                      value={newExpense.category}
+                      onChange={handleExpenseInputChange}
+                      placeholder="Expense Category (e.g., Gas)"
+                      className={border rounded-lg p-2 w-full focus:outline-none focus:ring-2 ${expenseError ? 'border-red-500 focus:ring-red-500' : 'focus:ring-blue-500'}}
+                      required
+                    />
+                  </div>
+                  <input
+                    type="number"
+                    name="amount"
+                    value={newExpense.amount}
+                    onChange={handleExpenseInputChange}
+                    placeholder="Amount"
+                    className={border rounded-lg p-2 w-full focus:outline-none focus:ring-2 ${expenseError ? 'border-red-500 focus:ring-red-500' : 'focus:ring-blue-500'}}
+                    required
+                  />
+                </div>
+                {expenseError && (
+                  <p className="text-red-500 text-sm mt-2">{expenseError}</p>
+                )}
+                <button
+                  type="submit"
+                  className="mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition"
+                >
+                  {editExpense ? 'Update Expense' : 'Add Expense'}
+                </button>
+              </form>
+            )}
+            <table className="w-full text-left border-collapse mt-2">
+              <thead>
+                <tr className="bg-gray-200">
+                  <th className="p-3">Category</th>
+                  <th className="p-3">Amount</th>
+                  <th className="p-3">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {currentMonthExpenses.map((expense, index) => (
+                  <tr key={index} className="border-b hover:bg-gray-50">
+                    <td className="p-3">{expense.category}</td>
+                    <td className="p-3">{formatNumber(expense.amount)}</td>
+                    <td className="p-3">
+                      <button
+                        className="bg-yellow-500 text-white px-2 py-1 rounded-lg hover:bg-yellow-600 transition mr-2"
+                        onClick={() => startEditingExpense(expense, index)}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        className="bg-red-500 text-white px-2 py-1 rounded-lg hover:bg-red-600 transition"
+                        onClick={() => deleteExpense(index)}
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="mt-6 grid grid-cols-3 gap-4">
+            <div className="bg-blue-100 p-4 rounded-lg">
+              <h3 className="text-lg font-semibold text-blue-800">Gross Collection</h3>
+              <p className="text-2xl font-bold">{formatNumber(totalRent)}</p>
+            </div>
+            <div className="bg-red-100 p-4 rounded-lg">
+              <h3 className="text-lg font-semibold text-red-800">Monthly Expenses</h3>
+              <p className="text-2xl font-bold">{formatNumber(totalExpenses)}</p>
+            </div>
+            <div className="bg-green-100 p-4 rounded-lg">
+              <h3 className="text-lg font-semibold text-green-800">Net Cash</h3>
+              <p className="text-2xl font-bold">{formatNumber(net)}</p>
+            </div>
+          </div>
+
+          <div className="mt-8">
+            <h3 className="text-lg font-semibold text-gray-800">Financial Overview</h3>
+            <div className="h-80">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="month" fontSize={12} />
+                  <YAxis fontSize={12} />
+                  <Tooltip formatter={(value) => formatNumber(value)} />
+                  <Legend />
+                  <Bar dataKey="rent" fill="#3B82F6" name="Gross Rent" />
+                  <Bar dataKey="expenses" fill="#EF4444" name="Expenses" />
+                  <Bar dataKey="net" fill="#10B981" name="Net Cash" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="mt-6">
+            <div className="flex justify-between items-center">
+              <h3 className="text-lg font-semibold text-gray-800">*N.B</h3>
+              <button
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition"
+                onClick={() => {
+                  setNewNote('');
+                  setShowNoteForm(!showNoteForm);
+                  setNoteError('');
+                }}
+              >
+                {showNoteForm ? 'Cancel' : 'Add Note'}
+              </button>
+            </div>
+            {showNoteForm && (
+              <form onSubmit={addNote} className="mt-4 p-4 bg-gray-50 rounded-lg">
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={newNote}
+                    onChange={handleNoteInputChange}
+                    placeholder="Enter note (e.g., GB - Gas Bottle/Chandgaon)"
+                    className={border rounded-lg p-2 w-full focus:outline-none focus:ring-2 ${noteError ? 'border-red-500 focus:ring-red-500' : 'focus:ring-blue-500'}}
+                  />
+                  {noteError && (
+                    <p className="text-red-500 text-sm mt-1">{noteError}</p>
+                  )}
+                </div>
+                <button
+                  type="submit"
+                  className="mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition"
+                >
+                  Add Note
+                </button>
+              </form>
+            )}
+            {currentNotes.length > 0 && (
+              <ul className="mt-2 text-gray-600">
+                {currentNotes.map((note, index) => (
+                  <li key={index} className="flex justify-between items-center py-1">
+                    <span>{note}</span>
+                    <button
+                      className="bg-red-500 text-white px-2 py-1 rounded-lg hover:bg-red-600 transition"
+                      onClick={() => deleteNote(index)}
+                    >
+                      Delete
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+
+</html>

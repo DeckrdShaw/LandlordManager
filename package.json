@@ -1,0 +1,14 @@
+{
+  "name": "landlord-app",
+  "version": "1.0.0",
+  "description": "Landlord Management App",
+  "dependencies": {
+    "@capacitor/core": "^6.1.2",
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/ios": "^6.1.2"
+  },
+  "scripts": {
+    "build": "echo 'No build script needed'"
+  }
+}
+
